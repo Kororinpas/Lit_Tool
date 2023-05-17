@@ -58,10 +58,11 @@ def Vector_Databse():
 
 
 def Parameters():
+    import os
     openai_api_key = st.text_input('Enter your Openapi_api_key')
     if st.button('Confirm'):
         if openai_api_key == '':
-            st.session_state['openai_api_key'] = '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'
+            st.session_state['openai_api_key'] = os.environ.get('openai_api_key')
         else:
             st.session_state['openai_api_key'] = openai_api_key
 
