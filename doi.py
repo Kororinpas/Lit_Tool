@@ -3,10 +3,7 @@ def get_doi(abstract):
   from kor.nodes import Object, Text, Number
   from langchain.chat_models import ChatOpenAI
 
-  llm = ChatOpenAI(
-    model_name="gpt-3.5-turbo",
-    temperature=0,
-    )
+  llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0) # type: ignore
   schema = Object(
       id="doi",
       description="doi is a digital identifier.It typically starts with 10. followed by a numeric prefix, such as 10.1000/182.",

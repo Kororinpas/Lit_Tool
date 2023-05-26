@@ -4,7 +4,7 @@ def get_chain_output(query,docs):
     
     from langchain.chat_models import ChatOpenAI
     
-    llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
+    llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo") # type: ignore
     
     from langchain.prompts import PromptTemplate,ChatPromptTemplate,HumanMessagePromptTemplate
     from langchain.llms import OpenAI
