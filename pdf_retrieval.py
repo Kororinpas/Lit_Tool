@@ -156,13 +156,14 @@ def get_pdf_first_page_txt(pdf_path, pages=2):
     return headers_para(doc, size_tag, pages)
 
 
-def get_pdf_page_metadata(pdf_path, pages=2):
-    pdf_first_page_txt = get_pdf_first_page_txt(pdf_path, 1)
+def get_pdf_page_metadata(pdf_path, pages):
+    pdf_first_page_txt = get_pdf_first_page_txt(pdf_path, pages)
 
     template = """
-                I have a paragraph which was extracted from the first page of a PDF file. 
+                I have a paragraph which was extracted from the first page of a Journal of Economic Literature (JEL) PDF file. 
                 The paragraph typically begins with the word 'Abstract' and there is usually a 'Keywords' section following it. 
                 I would like you to extract and return the article title, author, abstract section, and keywords section.
+                If you come across JEL classifications such as C12 and P34, please disregard them and do not include them in the abstract or keywords.
 
                 {format_instructions}
 
@@ -210,7 +211,7 @@ def get_pdf_page_metadata(pdf_path, pages=2):
     return result
 
 
-def save_pdfs_metadata_to_db(pdf_files, excel_file):
+def save_pdfs_metadata_to_db(pdf_files, excel_file, pages=1):
     if os.path.exists(excel_file):
         df = pd.read_excel(excel_file)
         existing_data = df.to_dict(orient='records')
@@ -225,7 +226,7 @@ def save_pdfs_metadata_to_db(pdf_files, excel_file):
         if tail not in existing_filenames:
             print('get meta from LLM '+doc)
             try:
-                metadata = get_pdf_page_metadata(doc)
+                metadata = get_pdf_page_metadata(doc, pages)
                 temp_data = []
                 temp_data.append(metadata)
                 save_to_excel(existing_data+temp_data, excel_file)
@@ -245,3 +246,11 @@ def save_to_excel(data, file_path):
     df = pd.DataFrame(data)
     df.to_excel(file_path, index=False)
     
+def main():
+    
+    documents = ['./data/docs/abstracts/tujula2007.pdf']    
+    output_file = "data/db/repo.xlsx"
+    save_pdfs_metadata_to_db(documents, output_file, 1)
+
+if __name__ == '__main__':
+    main()
