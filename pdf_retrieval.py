@@ -161,11 +161,10 @@ def get_pdf_page_metadata(pdf_path, pages):
     pdf_first_page_txt = get_pdf_first_page_txt(pdf_path, pages)
 
     template = """
-                I have a paragraph which was extracted from the first page of a Journal of Economic Literature (JEL) PDF file. 
-                The paragraph typically begins with the word 'Abstract' and there is usually a 'Keywords' section following it. 
-                I would like you to extract and return the article title, author, abstract section, and keywords section.
-                If you come across JEL classifications such as C12 and P34, please disregard them and do not include them in the abstract or keywords.
-
+                I have extracted text from the initial pages of a Journal of Economic Literature (JEL) PDF file. I require assistance in extracting 
+                specific details, namely: article title, author, abstract and keywords section. Please be aware that if you encounter 
+                JEL classifications such as C12 and P34, kindly ignore them and refrain from including them in the abstract and keywords.                
+                
                 {format_instructions}
 
                 Wrap your final output as a json objects
@@ -191,7 +190,7 @@ def get_pdf_page_metadata(pdf_path, pages):
         partial_variables={"format_instructions": output_parser.get_format_instructions()}
     )
 
-    llm = ChatOpenAI(model_name='gpt-3.5-turbo',temperature=0.0, max_tokens=2048) # type: ignore
+    llm = ChatOpenAI(model_name='gpt-3.5-turbo',temperature=0.0,max_tokens=2048) # type: ignore gpt-3.5-turbo
 
     final_prompt = prompt.format_prompt(pdf_first_page_txt=pdf_first_page_txt)
     output = llm(final_prompt.to_messages())
@@ -203,7 +202,7 @@ def get_pdf_page_metadata(pdf_path, pages):
             json_string = output.content.split("```json")[1].strip()
         else:
             json_string = output.content
-        result = json.loads(json_string)
+        result = fix_JSON(json_string)
 
     head, tail = os.path.split(pdf_path)
 
@@ -212,7 +211,73 @@ def get_pdf_page_metadata(pdf_path, pages):
     return result
 
 
-def save_pdfs_metadata_to_db(pdf_files, excel_file, pages=1):
+def get_pdf_intro(pdf_path, pages):
+    pdf_first_page_txt = get_pdf_first_page_txt(pdf_path, pages)
+
+    template = """
+                I have extracted text from the initial pages of a Journal of Economic Literature (JEL) PDF file. I require assistance in extracting 
+                introduction section.  Typically, the introduction section begins after the abstract and ends before the next sub-title or section heading.         
+                
+                {format_instructions}
+
+                Wrap your final output as a json objects
+
+                INPUT:
+                {pdf_first_page_txt}
+
+                YOUR RESPONSE:
+    """
+    response_schemas = [
+        ResponseSchema(name="introduction", description="extracted introduction")
+    ]
+    output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
+
+    prompt = ChatPromptTemplate(
+        messages=[
+            HumanMessagePromptTemplate.from_template(template)  
+        ],
+        input_variables=["pdf_first_page_txt"],
+        partial_variables={"format_instructions": output_parser.get_format_instructions()}
+    )
+
+    llm = ChatOpenAI(model_name='gpt-3.5-turbo',temperature=0.0,max_tokens=2048) # type: ignore gpt-3.5-turbo
+
+    final_prompt = prompt.format_prompt(pdf_first_page_txt=pdf_first_page_txt)
+    output = llm(final_prompt.to_messages())
+
+    try:
+        result = output_parser.parse(output.content)
+    except Exception as e:
+        print(str(e))
+        if "```json" in output.content:
+            json_string = output.content.split("```json")[1].strip()
+        else:
+            json_string = output.content
+        result = fix_JSON(json_string)
+
+    head, tail = os.path.split(pdf_path)
+
+    result["filename"] = tail
+
+    return result
+
+
+def fix_JSON(json_message=None):
+    result = None
+    try:        
+        result = json.loads(json_message)
+    except Exception as e:      
+        # Find the offending character index:
+        idx_to_replace = int(str(e).split(' ')[-1].replace(')', ''))        
+        # Remove the offending character:
+        json_message = list(json_message)
+        json_message[idx_to_replace] = ' '
+        new_message = ''.join(json_message)     
+        return fix_JSON(json_message=new_message)
+    return result
+
+
+def save_pdfs_to_db(pdf_files, excel_file, is_intro=False, pages=2):
     if os.path.exists(excel_file):
         df = pd.read_excel(excel_file)
         existing_data = df.to_dict(orient='records')
@@ -227,7 +292,10 @@ def save_pdfs_metadata_to_db(pdf_files, excel_file, pages=1):
         if tail not in existing_filenames:
             print('get meta from LLM '+doc)
             try:
-                metadata = get_pdf_page_metadata(doc, pages)
+                if is_intro:
+                    metadata = get_pdf_intro(doc, pages)
+                else:
+                    metadata = get_pdf_page_metadata(doc, pages)
                 temp_data = []
                 temp_data.append(metadata)
                 save_to_excel(existing_data+temp_data, excel_file)
@@ -248,6 +316,12 @@ def get_column_from_db(excel_file, column):
     doc = DataFrameLoader(df, column).load()
     return doc
 
+def get_filename_list(similar_dict, path):
+    filenames = []
+    for doc in similar_dict['context']:
+        filenames.append(os.path.join(path, doc.metadata['filename']))
+    return filenames
+
 
 def save_to_excel(data, file_path):
     df = pd.DataFrame(data)
@@ -255,9 +329,12 @@ def save_to_excel(data, file_path):
     
 def main():
     
-    documents = ['./data/docs/abstracts/tujula2007.pdf']    
-    output_file = "data/db/repo.xlsx"
-    save_pdfs_metadata_to_db(documents, output_file, 1)
+    documents = ['./data/docs/literature/Do people care about democracy_An experiment exploring the value of voting rights.pdf',
+                    './data/docs/literature/Expressive voting versus information avoidance_expenrimental evidence in the context of climate change mitigation.pdf',
+                    './data/docs/literature/Crashing the party_An experimental investigation of strategic voting in primary elections.pdf',
+                    './data/docs/literature/Economic growth and political extremism.pdf']  
+    output_file = "data/db/repo_intro_4.xlsx"
+    save_pdfs_to_db(documents, output_file, True, 3)
 
 if __name__ == '__main__':
     main()
