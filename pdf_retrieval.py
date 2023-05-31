@@ -2,6 +2,7 @@ from operator import itemgetter
 from langchain.chat_models import ChatOpenAI
 from langchain.output_parsers import StructuredOutputParser, ResponseSchema
 from langchain.prompts import ChatPromptTemplate, HumanMessagePromptTemplate
+from langchain.document_loaders import DataFrameLoader
 
 import os
 import fitz
@@ -238,8 +239,14 @@ def save_pdfs_metadata_to_db(pdf_files, excel_file, pages=1):
 
 def get_metadata_from_db(excel_file):
     df = pd.read_excel(excel_file)
-    dict = df.to_dict(orient='records')
+    dict = df.to_dict(orient='records',)
     return dict
+
+
+def get_column_from_db(excel_file, column):
+    df = pd.read_excel(excel_file)
+    doc = DataFrameLoader(df, column).load()
+    return doc
 
 
 def save_to_excel(data, file_path):
