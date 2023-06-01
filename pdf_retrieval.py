@@ -262,21 +262,18 @@ def get_pdf_intro(pdf_path, pages):
     return result
 
 
-def get_polish_intro(my_intro, sample_introes):
+def get_polish_intro(my_intro, sample_introes, words_limit, temperature):
     template = """
                 I require an introduction for my Journal of Economic Literature and I would appreciate it 
-                if you could compose it for me. I would like the introduction to be based on three 
+                if you could compose it for me around {words_limit} words. I would like the introduction mimic on the 
                 sample introductions that I will provide. If I have already provided my own introduction, 
                 please refine it accordingly.
-                
-                INPUT:
-                My introduction: {my_intro}
 
-                Sample 1 introduction: {sample1}
+                % My own introduction: {my_intro}
 
-                Sample 2 introduction: {sample2}
-
-                Sample 3 introduction: {sample3}
+                % Sample introductions:
+                {sample_introes}
+                % End of sample introductions:
 
                 YOUR RESPONSE:
     """
@@ -289,13 +286,13 @@ def get_polish_intro(my_intro, sample_introes):
         messages=[
             HumanMessagePromptTemplate.from_template(template)  
         ],
-        input_variables=["my_intro","sample1","sample2","sample3"],
+        input_variables=["my_intro","sample_introes","words_limit"],
         partial_variables={"format_instructions": output_parser.get_format_instructions()}
     )
 
-    llm = ChatOpenAI(model_name='gpt-3.5-turbo',temperature=0.0,max_tokens=2048) # type: ignore gpt-3.5-turbo
+    llm = ChatOpenAI(model_name='gpt-3.5-turbo',temperature=temperature,max_tokens=2048) # type: ignore gpt-3.5-turbo
 
-    final_prompt = prompt.format_prompt(my_intro=my_intro, sample1=sample_introes[0], sample2=sample_introes[1], sample3=sample_introes[2])
+    final_prompt = prompt.format_prompt(my_intro=my_intro, sample_introes=sample_introes, words_limit=words_limit)
     output = llm(final_prompt.to_messages())
 
     result = output.content
@@ -379,7 +376,7 @@ def main():
     intro35_excel_file = "data/db/repo_intro_35.xlsx"
 
     intros = [dict["introduction"] for dict in get_metadata_from_db(intro35_excel_file)]
-    polish = get_polish_intro('', intros)
+    polish = get_polish_intro('', intros[:3], 600, 0)
     print(polish)
 
 if __name__ == '__main__':
