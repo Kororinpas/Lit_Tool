@@ -262,6 +262,47 @@ def get_pdf_intro(pdf_path, pages):
     return result
 
 
+def get_polish_intro(my_intro, sample_introes):
+    template = """
+                I require an introduction for my Journal of Economic Literature and I would appreciate it 
+                if you could compose it for me. I would like the introduction to be based on three 
+                sample introductions that I will provide. If I have already provided my own introduction, 
+                please refine it accordingly.
+                
+                INPUT:
+                My introduction: {my_intro}
+
+                Sample 1 introduction: {sample1}
+
+                Sample 2 introduction: {sample2}
+
+                Sample 3 introduction: {sample3}
+
+                YOUR RESPONSE:
+    """
+    response_schemas = [
+        ResponseSchema(name="introduction", description="refined introduction")
+    ]
+    output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
+
+    prompt = ChatPromptTemplate(
+        messages=[
+            HumanMessagePromptTemplate.from_template(template)  
+        ],
+        input_variables=["my_intro","sample1","sample2","sample3"],
+        partial_variables={"format_instructions": output_parser.get_format_instructions()}
+    )
+
+    llm = ChatOpenAI(model_name='gpt-3.5-turbo',temperature=0.0,max_tokens=2048) # type: ignore gpt-3.5-turbo
+
+    final_prompt = prompt.format_prompt(my_intro=my_intro, sample1=sample_introes[0], sample2=sample_introes[1], sample3=sample_introes[2])
+    output = llm(final_prompt.to_messages())
+
+    result = output.content
+
+    return result
+
+
 def fix_JSON(json_message=None):
     result = None
     try:        
@@ -316,6 +357,7 @@ def get_column_from_db(excel_file, column):
     doc = DataFrameLoader(df, column).load()
     return doc
 
+
 def get_filename_list(similar_dict, path):
     filenames = []
     for doc in similar_dict['context']:
@@ -334,7 +376,11 @@ def main():
                     './data/docs/literature/Crashing the party_An experimental investigation of strategic voting in primary elections.pdf',
                     './data/docs/literature/Economic growth and political extremism.pdf']  
     output_file = "data/db/repo_intro_4.xlsx"
-    save_pdfs_to_db(documents, output_file, True, 3)
+    intro35_excel_file = "data/db/repo_intro_35.xlsx"
+
+    intros = [dict["introduction"] for dict in get_metadata_from_db(intro35_excel_file)]
+    polish = get_polish_intro('', intros)
+    print(polish)
 
 if __name__ == '__main__':
     main()
