@@ -87,6 +87,18 @@ def font_tags(font_counts, styles):
     return size_tag
 
 
+def get_pdf_raw_pages(doc, pages):
+    header_para = []
+    pageCounter = 0
+    for page in doc:
+        blocks = page.get_text("dict")["blocks"]
+        header_para.append(blocks)
+        pageCounter += 1
+        if pageCounter >= pages:
+            break
+    return header_para
+
+
 def headers_para(doc, size_tag, pages=2):
     """Scrapes headers & paragraphs from PDF and return texts with element tags.
 
@@ -218,8 +230,6 @@ def get_pdf_intro(pdf_path, pages):
                 I have extracted text from the initial pages of a Journal of Economic Literature (JEL) PDF file. I require assistance in extracting 
                 introduction section.  Typically, the introduction section begins after the abstract and ends before the next sub-title or section heading.         
                 
-                {format_instructions}
-
                 Wrap your final output as a json objects
 
                 INPUT:
@@ -237,10 +247,10 @@ def get_pdf_intro(pdf_path, pages):
             HumanMessagePromptTemplate.from_template(template)  
         ],
         input_variables=["pdf_first_page_txt"],
-        partial_variables={"format_instructions": output_parser.get_format_instructions()}
+        # partial_variables={"format_instructions": output_parser.get_format_instructions()}
     )
 
-    llm = ChatOpenAI(model_name='gpt-3.5-turbo',temperature=0.0,max_tokens=2048) # type: ignore gpt-3.5-turbo
+    llm = ChatOpenAI(model_name='gpt-3.5-turbo',temperature=0.0,max_tokens=1396) # type: ignore gpt-3.5-turbo
 
     final_prompt = prompt.format_prompt(pdf_first_page_txt=pdf_first_page_txt)
     output = llm(final_prompt.to_messages())
@@ -264,10 +274,10 @@ def get_pdf_intro(pdf_path, pages):
 
 def get_polish_intro(my_intro, sample_introes, words_limit, temperature):
     template = """
-                I require an introduction for my Journal of Economic Literature and I would appreciate it 
-                if you could compose it for me around {words_limit} words. I would like the introduction mimic on the 
-                sample introductions that I will provide. If I have already provided my own introduction, 
-                please refine it accordingly.
+                I require an introduction for my Journal of Economic Literature and I would appreciate it \
+                if you could compose it for me around {words_limit} words. I would like the introduction mimic on the \
+                sample introductions that I will provide. If I have already provided my own introduction, \
+                please refine it accordingly. 
 
                 % My own introduction: {my_intro}
 
@@ -331,7 +341,7 @@ def save_pdfs_to_db(pdf_files, excel_file, is_intro=False, pages=2):
             print('get meta from LLM '+doc)
             try:
                 if is_intro:
-                    metadata = get_pdf_intro(doc, pages)
+                    metadata = get_pdf_intro2(doc, pages)
                 else:
                     metadata = get_pdf_page_metadata(doc, pages)
                 temp_data = []
@@ -366,18 +376,84 @@ def save_to_excel(data, file_path):
     df = pd.DataFrame(data)
     df.to_excel(file_path, index=False)
     
+
+def get_pdf_intro2(pdf_path, pages):
+    pdf_first_page_txt = get_pdf_first_page_txt(pdf_path, pages)
+
+    human_template = """I have extracted the text from the initial pages of a Journal of Economic Literature (JEL) PDF file. 
+    I need help extracting the introduction section. Normally, the introduction section starts after the abstract and 
+    ends before the next sub-title or section heading.
+
+    Please note that if you come across a paragraph starting with an asterisk (*), please ignore it and do not include 
+    it in the introduction. You should continue searching for more introduction content until it's end before next section heading.
+    
+    Wrap your final output as a json objects
+
+    INPUT: {pdf_first_page_txt}
+
+    YOUR RESPONSE:
+"""
+    response_schemas = [
+        ResponseSchema(name="introduction", description="extracted introduction")
+    ]
+    output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
+
+    prompt = ChatPromptTemplate(
+        messages=[
+            HumanMessagePromptTemplate.from_template(human_template)  
+        ],
+        input_variables=["pdf_first_page_txt"]
+    )
+
+    llm = ChatOpenAI(model_name='gpt-4',temperature=0.0,max_tokens=4508) # type: ignore gpt-3.5-turbo
+
+    final_prompt = prompt.format_prompt(pdf_first_page_txt=pdf_first_page_txt)
+    output = llm(final_prompt.to_messages())
+
+    try:
+        result = output_parser.parse(output.content)
+    except Exception as e:
+        print(str(e))
+        if "```json" in output.content:
+            json_string = output.content.split("```json")[1].strip()
+        else:
+            json_string = output.content
+        result = fix_JSON(json_string)
+
+    head, tail = os.path.split(pdf_path)
+
+    result["filename"] = tail
+
+    return result
+
+
 def main():
     
     documents = ['./data/docs/literature/Do people care about democracy_An experiment exploring the value of voting rights.pdf',
                     './data/docs/literature/Expressive voting versus information avoidance_expenrimental evidence in the context of climate change mitigation.pdf',
                     './data/docs/literature/Crashing the party_An experimental investigation of strategic voting in primary elections.pdf',
                     './data/docs/literature/Economic growth and political extremism.pdf']  
-    output_file = "data/db/repo_intro_4.xlsx"
-    intro35_excel_file = "data/db/repo_intro_35.xlsx"
-
-    intros = [dict["introduction"] for dict in get_metadata_from_db(intro35_excel_file)]
-    polish = get_polish_intro('', intros[:3], 600, 0)
-    print(polish)
+    doc = './data/docs/literature/Economic growth and political extremism.pdf'
+    # './data/docs/literature/Expressive voting versus information avoidance_expenrimental evidence in the context of climate change mitigation.pdf'
+    documents = ['./data/docs/literature/Do people care about democracy_An experiment exploring the value of voting rights.pdf'
+                  ,'./data/docs/literature/Expressive voting versus information avoidance_expenrimental evidence in the context of climate change mitigation.pdf'
+                   ,'./data/docs/literature/Economic growth and political extremism.pdf'   ]
+    # './data/docs/literature/Expressive voting versus information avoidance_expenrimental evidence in the context of climate change mitigation.pdf',
+    #                 './data/docs/literature/Crashing the party_An experimental investigation of strategic voting in primary elections.pdf',
+    #                 './data/docs/literature/Economic growth and political extremism.pdf']  
+   
+    # save_pdfs_to_db(documents, intro_excel_file, is_Intro=True, pages=2)
+    metadata = get_pdf_intro2(doc, 4)
+    # pdf_first_page_txt = get_pdf_first_page_txt(doc, 3)
+    # raw_txt = get_pdf_raw_pages(fitz.open(doc), 3)
+    # pdf_first_page_txt = get_pdf_first_page_txt(doc, 3)
+    print(metadata)
+    # output_file = "data/db/repo_intro_4.xlsx"
+    # intro354_excel_file = "data/db/repo_intro_35_4.xlsx"
+    # save_pdfs_to_db(documents, intro354_excel_file, is_intro=True, pages=3)
+    # intros = [dict["introduction"] for dict in get_metadata_from_db(intro35_excel_file)]
+    # polish = get_polish_intro('', intros[:3], 600, 0)
+    # print(polish)
 
 if __name__ == '__main__':
     main()
