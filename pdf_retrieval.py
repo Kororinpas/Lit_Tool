@@ -8,6 +8,7 @@ import os
 import fitz
 import pandas as pd
 import json
+import ast
 
 def fonts(doc, granularity=False, pages=2):
     """Extracts fonts and their usage in PDF documents.
@@ -202,7 +203,7 @@ def get_pdf_page_metadata(pdf_path, pages):
         partial_variables={"format_instructions": output_parser.get_format_instructions()}
     )
 
-    llm = ChatOpenAI(model_name='gpt-3.5-turbo',temperature=0.0,max_tokens=2048) # type: ignore gpt-3.5-turbo
+    llm = ChatOpenAI(model_name='gpt-3.5-turbo-16k',temperature=0.0,max_tokens=6048) # type: ignore gpt-3.5-turbo
 
     final_prompt = prompt.format_prompt(pdf_first_page_txt=pdf_first_page_txt)
     output = llm(final_prompt.to_messages())
@@ -222,6 +223,55 @@ def get_pdf_page_metadata(pdf_path, pages):
 
     return result
 
+def get_pdf_page_accept_metadata(pdf_path, pages):
+    pdf_first_page_txt = get_pdf_first_page_txt(pdf_path, pages)
+
+    template = """
+                I have extracted text from the initial pages of a Journal of Economic Literature (JEL) PDF file. 
+                I need help identifying the accepted date of the article. If the accepted date is not explicitly specified, 
+                it should be located either at the top or bottom of the first or second page of the article in a date format without the prefix 'accepted'.                
+                
+                {format_instructions}
+
+                Wrap your final output as a json objects
+
+                INPUT:
+                {pdf_first_page_txt}
+
+                YOUR RESPONSE:
+    """
+    response_schemas = [
+        ResponseSchema(name="accepted", description="extracted accepted date")
+    ]
+    output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
+
+    prompt = ChatPromptTemplate(
+        messages=[
+            HumanMessagePromptTemplate.from_template(template)  
+        ],
+        input_variables=["pdf_first_page_txt"],
+        partial_variables={"format_instructions": output_parser.get_format_instructions()}
+    )
+
+    llm = ChatOpenAI(model_name='gpt-3.5-turbo',temperature=0.0,max_tokens=148) # type: ignore gpt-3.5-turbo
+
+    final_prompt = prompt.format_prompt(pdf_first_page_txt=pdf_first_page_txt)
+    output = llm(final_prompt.to_messages())
+
+    try:
+        result = output_parser.parse(output.content)
+    except:
+        if "```json" in output.content:
+            json_string = output.content.split("```json")[1].strip()
+        else:
+            json_string = output.content
+        result = fix_JSON(json_string)
+
+    head, tail = os.path.split(pdf_path)
+
+    result["filename"] = tail
+
+    return result
 
 def get_pdf_intro(pdf_path, pages):
     pdf_first_page_txt = get_pdf_first_page_txt(pdf_path, pages)
@@ -250,7 +300,7 @@ def get_pdf_intro(pdf_path, pages):
         # partial_variables={"format_instructions": output_parser.get_format_instructions()}
     )
 
-    llm = ChatOpenAI(model_name='gpt-3.5-turbo',temperature=0.0,max_tokens=1396) # type: ignore gpt-3.5-turbo
+    llm = ChatOpenAI(model_name='gpt-3.5-turbo-16k',temperature=0.0,max_tokens=8396) # type: ignore gpt-3.5-turbo
 
     final_prompt = prompt.format_prompt(pdf_first_page_txt=pdf_first_page_txt)
     output = llm(final_prompt.to_messages())
@@ -325,7 +375,7 @@ def fix_JSON(json_message=None):
     return result
 
 
-def save_pdfs_to_db(pdf_files, excel_file, is_intro=False, pages=2):
+def save_pdfs_to_db(pdf_files, excel_file, meta_type='meta', pages=2):
     if os.path.exists(excel_file):
         df = pd.read_excel(excel_file)
         existing_data = df.to_dict(orient='records')
@@ -340,10 +390,13 @@ def save_pdfs_to_db(pdf_files, excel_file, is_intro=False, pages=2):
         if tail not in existing_filenames:
             print('get meta from LLM '+doc)
             try:
-                if is_intro:
+                if meta_type == 'intro':
                     metadata = get_pdf_intro2(doc, pages)
+                elif meta_type == 'date':
+                    metadata = get_pdf_page_accept_metadata(doc, pages)
                 else:
                     metadata = get_pdf_page_metadata(doc, pages)
+
                 temp_data = []
                 temp_data.append(metadata)
                 save_to_excel(existing_data+temp_data, excel_file)
@@ -363,6 +416,17 @@ def get_column_from_db(excel_file, column):
     df = pd.read_excel(excel_file)
     doc = DataFrameLoader(df, column).load()
     return doc
+
+
+def get_data_from_csv(file_path, column_name, filter_value):
+    data = pd.read_csv(file_path, encoding = 'unicode_escape')
+    filtered_data = data[data[column_name] == filter_value]
+    dict_data = filtered_data.to_dict(orient='records') #filtered_data.values.tolist()
+    for row in dict_data:
+        md = ast.literal_eval(row["metadata"])
+        # print(type(md))
+        row["date"] = md["modDate"]
+    return dict_data
 
 
 def get_filename_list(similar_dict, path):
@@ -387,7 +451,7 @@ def get_pdf_intro2(pdf_path, pages):
     Please note that if you come across a paragraph starting with an asterisk (*), please ignore it and do not include 
     it in the introduction. You should continue searching for more introduction content until it's end before next section heading.
     
-    Wrap your final output as a json objects
+    Wrap your final output as a json objects (key: Introduction should be Pascal case)
 
     INPUT: {pdf_first_page_txt}
 
@@ -405,7 +469,7 @@ def get_pdf_intro2(pdf_path, pages):
         input_variables=["pdf_first_page_txt"]
     )
 
-    llm = ChatOpenAI(model_name='gpt-4',temperature=0.0,max_tokens=4508) # type: ignore gpt-3.5-turbo
+    llm = ChatOpenAI(model_name='gpt-3.5-turbo-16k',temperature=0.0,max_tokens=6558) # type: ignore gpt-3.5-turbo
 
     final_prompt = prompt.format_prompt(pdf_first_page_txt=pdf_first_page_txt)
     output = llm(final_prompt.to_messages())
@@ -434,7 +498,8 @@ def main():
                     './data/docs/literature/Crashing the party_An experimental investigation of strategic voting in primary elections.pdf',
                     './data/docs/literature/Economic growth and political extremism.pdf']  
     doc = './data/docs/literature/Economic growth and political extremism.pdf'
-    # './data/docs/literature/Expressive voting versus information avoidance_expenrimental evidence in the context of climate change mitigation.pdf'
+    doc = './data/docs/literature/Expressive voting versus information avoidance_expenrimental evidence in the context of climate change mitigation.pdf'
+    doc = './data/docs/literature/Do people care about democracy_An experiment exploring the value of voting rights.pdf'
     documents = ['./data/docs/literature/Do people care about democracy_An experiment exploring the value of voting rights.pdf'
                   ,'./data/docs/literature/Expressive voting versus information avoidance_expenrimental evidence in the context of climate change mitigation.pdf'
                    ,'./data/docs/literature/Economic growth and political extremism.pdf'   ]
@@ -442,18 +507,29 @@ def main():
     #                 './data/docs/literature/Crashing the party_An experimental investigation of strategic voting in primary elections.pdf',
     #                 './data/docs/literature/Economic growth and political extremism.pdf']  
    
-    # save_pdfs_to_db(documents, intro_excel_file, is_Intro=True, pages=2)
-    metadata = get_pdf_intro2(doc, 4)
+    # save_pdfs_to_db(documents, intro_excel_file, is_Intro=True, pages=4)
+    metadata = get_pdf_intro2(doc, 3)
+    print(metadata)
     # pdf_first_page_txt = get_pdf_first_page_txt(doc, 3)
     # raw_txt = get_pdf_raw_pages(fitz.open(doc), 3)
     # pdf_first_page_txt = get_pdf_first_page_txt(doc, 3)
-    print(metadata)
+
     # output_file = "data/db/repo_intro_4.xlsx"
-    # intro354_excel_file = "data/db/repo_intro_35_4.xlsx"
-    # save_pdfs_to_db(documents, intro354_excel_file, is_intro=True, pages=3)
+
+    # intro354_excel_file = "data/db/repo_intro_35_16.xlsx"
+    # save_pdfs_to_db(documents, intro354_excel_file, is_intro=True, pages=4)
+
     # intros = [dict["introduction"] for dict in get_metadata_from_db(intro35_excel_file)]
     # polish = get_polish_intro('', intros[:3], 600, 0)
     # print(polish)
+
+
+    # csv_file = "./data/db/summary.csv"
+    # column_name = "Theme"
+    # filter_value = "China authoritarian system"
+    # data = get_data_from_csv(csv_file, column_name, filter_value)
+    # print(data)
+    
 
 if __name__ == '__main__':
     main()
