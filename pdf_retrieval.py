@@ -2,7 +2,8 @@ from operator import itemgetter
 from langchain.chat_models import ChatOpenAI
 from langchain.output_parsers import StructuredOutputParser, ResponseSchema
 from langchain.prompts import ChatPromptTemplate, HumanMessagePromptTemplate
-from langchain.document_loaders import DataFrameLoader
+from langchain.document_loaders import DataFrameLoader, PyMuPDFLoader
+
 
 import os
 import fitz
@@ -119,6 +120,7 @@ def headers_para(doc, size_tag, pages=2):
     for page in doc:
         blocks = page.get_text("dict")["blocks"]
         for b in blocks:  # iterate through the text blocks
+            # header_para.append("<section_block>")
             if b['type'] == 0:  # this block contains text
 
                 # REMEMBER: multiple fonts and sizes are possible IN one block
@@ -152,7 +154,12 @@ def headers_para(doc, size_tag, pages=2):
                     # new block started, indicating with a pipe
                     block_string += "|"
 
+                # header_para.append("<text_block>")
                 header_para.append(block_string)
+                # header_para.append("<text_block_end>")
+
+            # header_para.append("<section_block_end>")
+
         pageCounter += 1
         if pageCounter >= pages:
             break
@@ -169,6 +176,13 @@ def get_pdf_first_page_txt(pdf_path, pages=2):
 
     return headers_para(doc, size_tag, pages)
 
+def get_pdf_pages(pdf_path, pages=2):
+    docs = PyMuPDFLoader(pdf_path).load()
+    return docs[:pages]
+    # texts = []
+    # for doc in docs[:pages]:
+    #     texts.append(doc.page_content)
+    # return texts
 
 def get_pdf_page_metadata(pdf_path, pages):
     pdf_first_page_txt = get_pdf_first_page_txt(pdf_path, pages)
@@ -388,7 +402,7 @@ def save_pdfs_to_db(pdf_files, excel_file, meta_type='meta', pages=2):
     for doc in pdf_files:
         head, tail = os.path.split(doc)
         if tail not in existing_filenames:
-            print('get meta from LLM '+doc)
+            # print('get meta from LLM '+doc)
             try:
                 if meta_type == 'intro':
                     metadata = get_pdf_intro2(doc, pages)
@@ -443,21 +457,27 @@ def save_to_excel(data, file_path):
 
 def get_pdf_intro2(pdf_path, pages):
     pdf_first_page_txt = get_pdf_first_page_txt(pdf_path, pages)
+    # pdf_first_page_txt = get_pdf_pages(pdf_path, pages)
 
-    human_template = """I have extracted the text from the initial pages of a Journal of Economic Literature (JEL) PDF file. 
-    I need help extracting the introduction section. Normally, the introduction section starts after the abstract and 
-    ends before the next sub-title or section heading.
+    human_template = """
+I have extracted the text from the initial pages of a Journal of Economic Literature (JEL) PDF file. I require assistance in extracting the introduction section. Typically, the document follows a pattern where the 'abstract' header is encountered, followed by the abstract section. Subsequently, an 'Introduction' header is expected, which is followed by the introduction section. Next, there may be a 'Background' header or other headers indicating different sections. The introduction section generally concludes before the next sub-title or section heading appears, such as 'Background' or other similar headings.
 
-    Please note that if you come across a paragraph starting with an asterisk (*), please ignore it and do not include 
-    it in the introduction. You should continue searching for more introduction content until it's end before next section heading.
-    
-    Wrap your final output as a json objects (key: Introduction should be Pascal case)
+Please continue searching for the introduction section until you reach a clear next sub-title or section heading. However, please note that if you encounter a bottom part between two pages, such as a section starting with 'RECEIVED:' followed by a date, it does not necessarily mean that the introduction section has ended. In such cases, you should continue searching on the next page.
 
-    INPUT: {pdf_first_page_txt}
+If the text 'www.elsevier.com' appears in the beginning, it indicates that the literature is published on Elsevier and follows a specific format. In this case, the abstract section will start with "A B S T R A C T" and end before the introduction section. The introduction section will typically start with "1. Introduction" and end before the next section header, such as "2. Background". Please continue searching for the introduction section until you reach next section heading such as "2. Background", it has to be started with "2.".
 
-    YOUR RESPONSE:
-"""
+Please provide the introduction section as the final output in JSON format with the key 'Introduction' written in Pascal case.
+
+Exclude the content of the abstract section.
+
+Only include the text within the introduction section and exclude any text prior to it.
+
+INPUT: {pdf_first_page_txt}
+
+YOUR RESPONSE:
+    """
     response_schemas = [
+        # ResponseSchema(name="abstract", description="extracted abstract"),
         ResponseSchema(name="introduction", description="extracted introduction")
     ]
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
@@ -469,7 +489,7 @@ def get_pdf_intro2(pdf_path, pages):
         input_variables=["pdf_first_page_txt"]
     )
 
-    llm = ChatOpenAI(model_name='gpt-3.5-turbo-16k',temperature=0.0,max_tokens=6558) # type: ignore gpt-3.5-turbo
+    llm = ChatOpenAI(model_name='gpt-3.5-turbo-16k',temperature=0.0,max_tokens=6658) # type: ignore gpt-3.5-turbo
 
     final_prompt = prompt.format_prompt(pdf_first_page_txt=pdf_first_page_txt)
     output = llm(final_prompt.to_messages())
@@ -497,9 +517,9 @@ def main():
                     './data/docs/literature/Expressive voting versus information avoidance_expenrimental evidence in the context of climate change mitigation.pdf',
                     './data/docs/literature/Crashing the party_An experimental investigation of strategic voting in primary elections.pdf',
                     './data/docs/literature/Economic growth and political extremism.pdf']  
-    doc = './data/docs/literature/Economic growth and political extremism.pdf'
-    doc = './data/docs/literature/Expressive voting versus information avoidance_expenrimental evidence in the context of climate change mitigation.pdf'
-    doc = './data/docs/literature/Do people care about democracy_An experiment exploring the value of voting rights.pdf'
+    doc = './data/docs/literature_suicide/1-s2.0-S0304387821000432-main.pdf'
+    doc = './data/docs/literature_suicide/1-s2.0-S0047272721000761-main.pdf'
+    # doc = './data/docs/literature_suicide/rest_a_00777.pdf'
     documents = ['./data/docs/literature/Do people care about democracy_An experiment exploring the value of voting rights.pdf'
                   ,'./data/docs/literature/Expressive voting versus information avoidance_expenrimental evidence in the context of climate change mitigation.pdf'
                    ,'./data/docs/literature/Economic growth and political extremism.pdf'   ]
@@ -508,10 +528,15 @@ def main():
     #                 './data/docs/literature/Economic growth and political extremism.pdf']  
    
     # save_pdfs_to_db(documents, intro_excel_file, is_Intro=True, pages=4)
-    metadata = get_pdf_intro2(doc, 3)
+    metadata = get_pdf_intro2(doc, 2)
     print(metadata)
+    # docs = get_pdf_first_page_txt(doc, 3)
+    # # docs = get_pdf_pages(doc, 2)
+    # # docs = get_pdf_raw_pages(doc, 2)
+    # print(docs)
     # pdf_first_page_txt = get_pdf_first_page_txt(doc, 3)
-    # raw_txt = get_pdf_raw_pages(fitz.open(doc), 3)
+    # raw_txt = get_pdf_raw_pages(fitz.open(doc), 2)
+    # print(raw_txt)
     # pdf_first_page_txt = get_pdf_first_page_txt(doc, 3)
 
     # output_file = "data/db/repo_intro_4.xlsx"
